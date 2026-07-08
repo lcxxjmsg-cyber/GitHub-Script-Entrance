@@ -9,7 +9,7 @@
     -r (target) may be:
       * a github.com page URL   -> https://github.com/user/repo/blob/main/foo.ps1 (auto-converted to raw)
       * a raw / any full URL    -> https://raw.githubusercontent.com/... or https://example.com/foo.ps1
-      * a local file path       -> C:\tools\foo.ps1  or  .\foo.bat  (relative allowed)
+      * a local file path       -> C:\tools\foo.ps1  (absolute path only)
 
     Supported target types: .ps1 / .bat / .cmd
 
@@ -62,9 +62,14 @@ $isUrl = $Run -match '^https?://'
 if ($isUrl) {
     $Run = ConvertTo-RawUrl $Run       # github page URL -> raw (if applicable)
 } else {
-    # local path (relative allowed): make absolute BEFORE elevation (CWD changes)
-    try { $Run = (Resolve-Path -LiteralPath $Run -ErrorAction Stop).Path }
-    catch { Write-Host "[ERROR] Local file not found: $Run" -ForegroundColor Red; return }
+    # local file: absolute path only
+    if (-not [System.IO.Path]::IsPathRooted($Run)) {
+        Write-Host "[ERROR] Local target must be an absolute path, e.g. C:\tools\x.ps1" -ForegroundColor Red; return
+    }
+    if (-not (Test-Path -LiteralPath $Run)) {
+        Write-Host "[ERROR] Local file not found: $Run" -ForegroundColor Red; return
+    }
+    $Run = (Resolve-Path -LiteralPath $Run).Path
 }
 
 # ---- self-elevate: relaunch as admin, passing the same params ----
