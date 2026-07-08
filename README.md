@@ -2,7 +2,7 @@
 
 **一句话，以管理员权限运行任意 GitHub / 网络 / 本地脚本 —— 免下载、免手动提权、免切目录。**
 
-把脚本存到 GitHub（或任意可访问的 URL），然后用一行命令就能：**自动请求管理员权限 → 通过国内可达的镜像下载 → 直接运行**。再也不用「先下载 → 手动以管理员打开 PowerShell / CMD → `cd` 切到脚本目录 → 敲一堆 `-ExecutionPolicy Bypass -File`」。
+把脚本存到 GitHub（或任意可访问的 URL），然后用一行命令就能：**自动请求管理员权限 → 通过国内可达的镜像下载 → 直接运行**。再也不用「先下载 → 右键以管理员打开 → `cd` 切目录 → 敲一堆 `-ExecutionPolicy Bypass -File`」。
 
 ---
 
@@ -11,8 +11,8 @@
 - [它解决什么问题](#它解决什么问题)
 - [快速开始](#快速开始)
 - [参数说明](#参数说明)
-- [目标地址的四种写法](#目标地址的四种写法)
-- [支持的文件类型](#支持的文件类型)
+- [目标地址的三种写法](#目标地址的三种写法)
+- [支持的文件类型与运行方式](#支持的文件类型与运行方式)
 - [工作原理](#工作原理)
 - [镜像与 ISP 封锁](#镜像与-isp-封锁)
 - [常见问题](#常见问题)
@@ -25,13 +25,13 @@
 
 1. 打开浏览器，找到并下载脚本
 2. 右键「以管理员身份运行 PowerShell」
-3. `Set-ExecutionPolicy` 或每次带 `-ExecutionPolicy Bypass`
+3. `Set-ExecutionPolicy` 或每次带 `-ExecutionPolicy Bypass`（脚本没签名会被拦）
 4. `cd` 切换到脚本所在目录
 5. 才能 `.\脚本.ps1` 跑起来
 
 而且在国内，`raw.githubusercontent.com` 经常被 ISP 干扰下载失败。
 
-**GitHub Script Entrance 把这一切压缩成一行命令。** 它是一个极小的「引导壳」`launch.ps1`，负责自动提权、镜像下载、按类型运行、跑完清理临时文件。
+**GitHub Script Entrance 把这一切压缩成一行命令。** 它是一个极小的「引导壳」`launch.ps1`，负责自动提权、镜像下载、按类型运行，跑完自动清理临时文件。
 
 ---
 
@@ -42,7 +42,7 @@
 按 `Win + R`，粘贴下面这行，回车（弹出 UAC 时点「是」）：
 
 ```
-powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -Run '你要运行的脚本'"
+powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r '你要运行的脚本'"
 ```
 
 ### 方式 B：命令提示符 (CMD) / PowerShell
@@ -53,59 +53,64 @@ powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.gith
 
 ```powershell
 # 1) 跑另一个 GitHub 仓库里的脚本（直接用好记的网页地址）
-powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -Run 'https://github.com/lcxxjmsg-cyber/SMBProxy/blob/main/client/setup-client-win10-11.ps1'"
+powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r 'https://github.com/lcxxjmsg-cyber/SMBProxy/blob/main/server/setup-server.ps1'"
 
 # 2) 跑任意网站上的脚本
-powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -Run 'https://example.com/tool.ps1'"
+powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r 'https://example.com/tool.ps1'"
 
-# 3) 跑本机的脚本（自动提权，省去手动开管理员窗口 + 切目录）
-powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -Run 'C:\tools\install.bat'"
+# 3) 跑本机脚本（相对/绝对路径都行，自动提权）
+powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r '.\install.bat'"
 
 # 4) 给目标脚本传参数
-powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -Run 'https://example.com/tool.ps1' -ScriptArgs '-Port','1445'"
+powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r 'https://example.com/tool.ps1' -a '-Port','1445'"
+
+# 5) 目标 ps1 需要读取同目录文件 -> 加 -d 落地运行
+powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r 'https://github.com/user/repo/blob/main/setup.ps1' -d"
 ```
 
 > 💡 **命令由两部分组成**：
 > - 前半段 `irm 'https://gh-proxy.com/.../launch.ps1'` 是**拉取引导壳本身**，地址固定、不用改。
-> - 后半段 `-Run '...'` 才是**你要运行的目标**，这里随便换。
+> - 后半段 `-r '...'` 才是**你要运行的目标**，这里随便换。
 
 ---
 
 ## 参数说明
 
-| 参数 | 必填 | 说明 |
-|------|:---:|------|
-| `-Run` | ✅ | 要运行的目标：URL / 仓库相对路径 / 本地文件路径 |
-| `-Repo` | | 仓库相对路径的归属仓库，默认 `lcxxjmsg-cyber/GitHub-Script-Entrance` |
-| `-Branch` | | 分支，默认 `main` |
-| `-ScriptArgs` | | 转发给目标脚本的参数（数组），如 `-ScriptArgs '-a','1'` |
-| `-NoElevate` | | 跳过自动提权（已是管理员或无需管理员时用） |
+| 参数 | 全名 | 必填 | 说明 |
+|------|------|:---:|------|
+| `-r` | `-Run` | ✅ | 要运行的目标：完整 URL / GitHub 网页地址 / 本地文件路径（相对或绝对） |
+| `-a` | `-ScriptArgs` | | 转发给目标脚本的参数（数组），如 `-a '-Port','1445'` |
+| `-d` | `-Disk` | | 让 `.ps1` 落地到临时文件再运行（默认内存运行）。脚本依赖同目录文件时用 |
+| `-n` | `-NoElevate` | | 跳过自动提权（已是管理员或无需管理员时用） |
+
+> 参数用短名 `-r/-a/-d/-n` 即可；PowerShell 也接受全名或任意不歧义的前缀。
 
 ---
 
-## 目标地址的四种写法
+## 目标地址的三种写法
 
-`-Run` 会自动识别下列四种形态：
+`-r` 会自动识别下列三种形态：
 
 | 写法 | 示例 | 处理方式 |
 |------|------|---------|
 | **GitHub 网页地址** | `https://github.com/user/repo/blob/main/x.ps1` | 自动转成 raw，走镜像加速 |
 | **raw / 任意 URL** | `https://raw.githubusercontent.com/...`<br>`https://example.com/x.ps1` | GitHub 走镜像；其他站直连 |
-| **仓库相对路径** | `client/setup.ps1` | 按 `-Repo`/`-Branch` 拼成 raw，走镜像 |
-| **本地文件路径** | `C:\a\x.ps1`、`.\x.bat` | 不下载，直接运行 |
+| **本地文件路径** | `C:\a\x.ps1`、`.\x.bat` | 不下载，直接运行（支持相对路径） |
 
 ---
 
-## 支持的文件类型
+## 支持的文件类型与运行方式
+
+只支持脚本类：`.ps1` / `.bat` / `.cmd`。（`.exe`/`.msi` 请自行在 GitHub 下载后一键执行，无需本工具解析。）
 
 | 类型 | 运行方式 |
 |------|---------|
-| `.ps1` | 在当前（管理员）进程内执行，交互输入（`Read-Host`）正常 |
-| `.bat` / `.cmd` | 下载到临时目录后用 `cmd.exe /c` 运行 |
-| `.exe` | 直接运行 |
-| `.msi` | 通过 `msiexec /i` 安装 |
+| `.ps1` | **默认内存运行**（不落地）；加 `-d` 则下载到临时文件再运行 |
+| `.bat` / `.cmd` | 下载到临时文件，用 `cmd.exe` 运行，跑完删除 |
 
-> 远程文件会下载到系统临时目录，运行结束后**自动清理**。所有目标都继承引导壳的**管理员权限**。
+> 所有落地的临时文件都会在运行结束后**自动清理**。所有目标都继承引导壳的**管理员权限**。
+
+**关于 `.ps1` 内存运行的一个注意点：** 内存运行时脚本没有对应磁盘文件，因此 `$PSScriptRoot` / `$MyInvocation.MyCommand.Path` 为空。如果脚本要找「和自己放在一起的文件」（配置、插件等），请加 `-d` 落地运行。
 
 ---
 
@@ -115,20 +120,22 @@ powershell "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.gith
 一行命令
    │
    ▼
-irm 拉取 launch.ps1 (引导壳, 走 gh 镜像)
+irm 拉取 launch.ps1 (引导壳, 走 gh 镜像, 内存执行)
    │
    ▼
-scriptblock 传参执行 launch.ps1 -Run <目标>
+scriptblock 传参执行 launch.ps1 -r <目标>
    │
    ├─ 非管理员? → UAC 提权, 原样带参重新拉起 (自身也走镜像)
    │
-   ├─ 识别 -Run:  GitHub网页→raw | raw/URL | 仓库相对 | 本地
+   ├─ 识别 -r:  GitHub网页→raw | raw/URL | 本地文件(相对/绝对)
    │
-   ├─ 远程? → 多镜像回退下载到临时目录 (github 类自动加速)
+   ├─ 远程? → 多镜像回退下载 (github 类自动加速)
    │
-   ├─ 按扩展名运行: ps1 / bat / cmd / exe / msi
+   ├─ 运行:
+   │     ps1  → 默认内存运行 (加 -d 落地)
+   │     bat/cmd → 落地临时文件, cmd /c 运行
    │
-   └─ finally: 清理临时文件
+   └─ finally: 清理所有临时文件
 ```
 
 ---
@@ -140,7 +147,7 @@ scriptblock 传参执行 launch.ps1 -Run <目标>
 1. `gh-proxy.com`（实时转发，永远最新）
 2. `ghproxy.net`
 3. `ghfast.top`
-4. `cdn.jsdelivr.net`（CDN，小文件回退）
+4. `cdn.jsdelivr.net`（CDN 回退）
 5. `fastly.jsdelivr.net`
 6. `raw.githubusercontent.com`（原始源，最后兜底）
 
@@ -152,27 +159,27 @@ scriptblock 传参执行 launch.ps1 -Run <目标>
 
 **Q：为什么前半段拉壳必须用 raw 地址，不能用 github 网页地址？**
 
-A：前半段是 PowerShell 的 `irm` 直接下载，没有任何智能转换；`gh-proxy.com/` 后面必须跟真实的 `raw.githubusercontent.com` 地址。而「github 网页地址自动转 raw」是**引导壳内部**的功能，只对后半段 `-Run` 的目标生效（那时壳已加载）。
+A：前半段是 PowerShell 的 `irm` 直接下载，没有任何智能转换；`gh-proxy.com/` 后面必须跟真实的 `raw.githubusercontent.com` 地址。而「github 网页地址自动转 raw」是**引导壳内部**的功能，只对后半段 `-r` 的目标生效（那时壳已加载）。
 
-**Q：能运行 GitLab / Bitbucket / 其他被墙平台的脚本吗？**
+**Q：`.ps1` 默认内存运行，会不会留在磁盘上？**
+
+A：不会。`.ps1` 默认在内存中执行，不写文件。只有你加了 `-d`、或运行 `.bat`/`.cmd` 时才会写临时文件，且运行结束即删除。
+
+**Q：我的 ps1 要读取同目录的配置文件，内存运行报错找不到？**
+
+A：加 `-d`。内存运行没有脚本文件路径（`$PSScriptRoot` 为空），落地运行即可恢复正常。
+
+**Q：`.bat` 也是管理员权限吗？**
+
+A：是。引导壳启动即提权为管理员，之后它运行的 `cmd` 继承管理员权限。
+
+**Q：为什么不支持 exe / msi？**
+
+A：可执行文件和安装包直接在 GitHub 下载后双击/一键运行即可，没必要用脚本壳去解析，故本工具只专注脚本类（ps1/bat/cmd）。
+
+**Q：能运行 GitLab / 其他被墙平台的脚本吗？**
 
 A：能下载能运行，但**不走 GitHub 镜像加速**（那些镜像只服务 GitHub）。若目标平台本身被 ISP 封锁，需要你自备通用代理。
-
-**Q：会不会把脚本留在磁盘上？**
-
-A：不会。远程脚本下载到系统临时目录，`finally` 中运行结束即删除。本地脚本则原地运行、不复制。
-
-**Q：`.ps1` 之外，`.bat` 也是管理员权限吗？**
-
-A：是。引导壳启动即提权为管理员，之后它启动的 `cmd`/`exe`/`msi` 全部继承管理员权限（Windows 子进程继承父进程令牌）。
-
-**Q：目标脚本需要交互输入怎么办？**
-
-A：`.ps1` 在当前进程内执行，`Read-Host` 等交互完全正常。
-
-**Q：如何拉取被墙的其他 GitHub 仓库？**
-
-A：直接把它的地址放进 `-Run` 即可，例如 `-Run 'https://github.com/别人/仓库/blob/main/x.ps1'`，会自动转 raw 并走镜像。
 
 ---
 

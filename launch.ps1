@@ -1,46 +1,54 @@
 <#
-    GitHub Script Entrance - universal admin launcher (launch.ps1)
+    GitHub Script Entrance - one-line admin launcher (launch.ps1)
 
-    A tiny "shell" that: self-elevates to Administrator, fetches/locates a
-    target script, and runs it. Designed to be invoked in one line via irm | iex
-    with parameters passed through a scriptblock:
+    Self-elevates to Administrator, fetches/locates a target script, and runs it.
+    Invoke in one line via a scriptblock:
 
-        & ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -Run '<target>'
+        & ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1'))) -r '<target>'
 
-    The -Run target may be:
+    -r (target) may be:
       * a github.com page URL   -> https://github.com/user/repo/blob/main/foo.ps1 (auto-converted to raw)
       * a raw / any full URL    -> https://raw.githubusercontent.com/... or https://example.com/foo.ps1
-      * a repo-relative path    -> client/setup.ps1   (resolved against -Repo/-Branch)
-      * a local file path       -> C:\tools\foo.ps1  or  .\foo.ps1
+      * a local file path       -> C:\tools\foo.ps1  or  .\foo.bat  (relative allowed)
 
-    Supported target types: .ps1 (run in-process), .bat/.cmd (run via cmd.exe),
-    .exe (run directly), .msi (run via msiexec). Extra args after -ScriptArgs are
-    forwarded to the target.
+    Supported target types: .ps1 / .bat / .cmd
 
-    github.com / raw.githubusercontent URLs (and repo-relative paths) are fetched
-    through GitHub proxy mirrors with automatic fallback (bypasses ISP blocking);
-    any other URL is downloaded directly.
+    Execution:
+      * .ps1      -> runs IN MEMORY by default (no temp file). Pass -d to run
+                     from a temp file instead (needed if the script relies on
+                     $PSScriptRoot / files next to itself).
+      * .bat/.cmd -> always downloaded to a temp file and run via cmd.exe, then
+                     the temp file is deleted.
 
-    NOTE: keep this file ASCII-only so "irm | iex" never mangles it, regardless
-    of the mirror's charset.
+    Parameters (short names; PowerShell also accepts unambiguous prefixes):
+      -r  Run         target to run (required)
+      -a  ScriptArgs  arguments forwarded to the target (array)
+      -d  Disk        force .ps1 to run from a temp file instead of memory
+      -n  NoElevate   skip self-elevation
+
+    In-memory .ps1 caveat: it has NO $PSScriptRoot / $MyInvocation.MyCommand.Path
+    (there is no file on disk). Use -d for scripts that need those.
+
+    github.com / raw.githubusercontent URLs are fetched through GitHub proxy
+    mirrors with automatic fallback (bypasses ISP blocking); any other URL is
+    downloaded directly.
+
+    NOTE: keep this file ASCII-only so "irm | iex" never mangles it.
 #>
 param(
     [Parameter(Mandatory = $true)]
-    [string]   $Run,                 # target: URL | repo-relative | local path
-    [string]   $Repo    = 'lcxxjmsg-cyber/GitHub-Script-Entrance',
-    [string]   $Branch  = 'main',
-    [string[]] $ScriptArgs = @(),    # arguments forwarded to the target
-    [switch]   $NoElevate            # skip self-elevation (already admin / not needed)
+    [Alias('r')]  [string]   $Run,             # target: URL | github page URL | local path
+    [Alias('a')]  [string[]] $ScriptArgs = @(),# arguments forwarded to the target
+    [Alias('d')]  [switch]   $Disk,            # force .ps1 to a temp file (default: memory)
+    [Alias('n')]  [switch]   $NoElevate        # skip self-elevation
 )
 
 # ---- force TLS 1.2 (required by GitHub) ----
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 
-# ---- normalize a github.com web URL into a raw.githubusercontent URL ----
-# So you can paste the easy-to-remember page URL instead of the raw one:
-#   https://github.com/USER/REPO/blob/BRANCH/PATH  -> raw.githubusercontent.com/USER/REPO/BRANCH/PATH
-#   https://github.com/USER/REPO/raw/BRANCH/PATH   -> (same)
-# Already-raw URLs and non-github URLs are returned unchanged.
+$SelfUrl = "https://gh-proxy.com/https://raw.githubusercontent.com/lcxxjmsg-cyber/GitHub-Script-Entrance/main/launch.ps1"
+
+# ---- github.com web URL -> raw.githubusercontent URL ----
 function ConvertTo-RawUrl([string]$url) {
     $m = [regex]::Match($url, '^https?://github\.com/(?<repo>[^/]+/[^/]+)/(?:blob|raw)/(?<branch>[^/]+)/(?<path>.+)$')
     if ($m.Success) {
@@ -49,32 +57,27 @@ function ConvertTo-RawUrl([string]$url) {
     return $url
 }
 
-$SelfUrl = "https://gh-proxy.com/https://raw.githubusercontent.com/$Repo/$Branch/launch.ps1"
-
 # ---- normalize the target ----
 $isUrl = $Run -match '^https?://'
 if ($isUrl) {
-    $Run = ConvertTo-RawUrl $Run      # github.com page URL -> raw URL (if applicable)
+    $Run = ConvertTo-RawUrl $Run       # github page URL -> raw (if applicable)
 } else {
-    # local path: absolutize BEFORE elevation (CWD changes after relaunch)
-    $maybeLocal = $null
-    try { $maybeLocal = (Resolve-Path -LiteralPath $Run -ErrorAction Stop).Path } catch {}
-    if ($maybeLocal) { $Run = $maybeLocal }   # real local file -> absolutize
-    # otherwise treat it as a repo-relative path (resolved later)
+    # local path (relative allowed): make absolute BEFORE elevation (CWD changes)
+    try { $Run = (Resolve-Path -LiteralPath $Run -ErrorAction Stop).Path }
+    catch { Write-Host "[ERROR] Local file not found: $Run" -ForegroundColor Red; return }
 }
 
-# ---- self-elevate: relaunch this shell as admin, passing the same params ----
+# ---- self-elevate: relaunch as admin, passing the same params ----
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin -and -not $NoElevate) {
     Write-Host "[*] Requesting administrator privileges..." -ForegroundColor Yellow
-    # Rebuild the one-liner for the elevated child. Local files are already
-    # absolute, so they still resolve after the working directory changes.
     $argList = ''
     if ($ScriptArgs.Count -gt 0) {
         $escaped = $ScriptArgs | ForEach-Object { "'" + ($_ -replace "'","''") + "'" }
-        $argList = ' -ScriptArgs ' + ($escaped -join ',')
+        $argList = ' -a ' + ($escaped -join ',')
     }
-    $inner = "& ([scriptblock]::Create((irm '$SelfUrl'))) -Run '$($Run -replace "'","''")' -Repo '$Repo' -Branch '$Branch'$argList"
+    if ($Disk) { $argList += ' -d' }
+    $inner = "& ([scriptblock]::Create((irm '$SelfUrl'))) -r '$($Run -replace "'","''")'$argList"
     try {
         Start-Process powershell.exe -Verb RunAs -ArgumentList @(
             '-NoProfile','-ExecutionPolicy','Bypass','-Command', $inner
@@ -87,10 +90,8 @@ if (-not $isAdmin -and -not $NoElevate) {
 
 # ================= mirrors =================
 # GitHub proxies first (real-time passthrough, always latest, bypass ISP block);
-# jsDelivr as fallback for small files; raw last.
+# jsDelivr as fallback; raw last. Non-github URLs are used as-is.
 function Get-MirrorUrls([string]$url) {
-    # Only rewrite raw.githubusercontent URLs into proxy variants; other hosts
-    # are used as-is.
     $m = [regex]::Match($url, '^https?://raw\.githubusercontent\.com/(?<repo>[^/]+/[^/]+)/(?<branch>[^/]+)/(?<path>.+)$')
     if (-not $m.Success) { return @($url) }
     $r = $m.Groups['repo'].Value; $b = $m.Groups['branch'].Value; $p = $m.Groups['path'].Value
@@ -117,49 +118,50 @@ function Download-Bytes([string]$url) {
     throw "All mirrors failed for: $url"
 }
 
-# ---- resolve the target into: a runnable local path (download if remote) ----
+function Bytes-ToText([byte[]]$bytes) {
+    $s = [System.Text.Encoding]::UTF8.GetString($bytes)
+    if ($s.Length -gt 0 -and $s[0] -eq [char]0xFEFF) { $s = $s.Substring(1) }
+    return $s
+}
+
+$isLocal = -not ($Run -match '^https?://')
+$ext = [System.IO.Path]::GetExtension((($Run -split '\?')[0])).ToLowerInvariant()
+if (-not $ext) { $ext = '.ps1' }
+
 $tempFiles = @()
-function Resolve-Target {
-    # 1) already a local file
-    if (-not ($Run -match '^https?://')) {
-        if (Test-Path -LiteralPath $Run) { return (Resolve-Path -LiteralPath $Run).Path }
-        # 2) repo-relative -> build a raw URL and fall through to download
-        $script:Run = "https://raw.githubusercontent.com/$Repo/$Branch/$($Run.TrimStart('/'))"
-    }
-    # 3) remote: download to a temp file, keep original extension
-    $ext = [System.IO.Path]::GetExtension(($Run -split '\?')[0])
-    if (-not $ext) { $ext = '.ps1' }
-    $tmp = Join-Path $env:TEMP ('launch_' + [Guid]::NewGuid().ToString('N').Substring(0,8) + $ext)
-    [System.IO.File]::WriteAllBytes($tmp, (Download-Bytes $Run))
+function New-TempFrom([byte[]]$bytes, [string]$extension) {
+    $tmp = Join-Path $env:TEMP ('launch_' + [Guid]::NewGuid().ToString('N').Substring(0,8) + $extension)
+    [System.IO.File]::WriteAllBytes($tmp, $bytes)
     $script:tempFiles += $tmp
     return $tmp
 }
 
 try {
-    $target = Resolve-Target
-    $ext = [System.IO.Path]::GetExtension($target).ToLowerInvariant()
-    Write-Host "[*] Running: $target" -ForegroundColor Cyan
-
     switch ($ext) {
         '.ps1' {
-            # Call operator runs in the same window (interactive Read-Host works)
-            # and forwards the argument array element-by-element (no re-splitting).
-            & $target @ScriptArgs
-        }
-        '.msi' {
-            $pa = @('/i', $target) + $ScriptArgs
-            Start-Process msiexec.exe -ArgumentList $pa -Wait
-        }
-        '.exe' {
-            if ($ScriptArgs.Count -gt 0) { & $target @ScriptArgs }
-            else { & $target }
+            if ($Disk) {
+                # run from a temp file (keeps $PSScriptRoot working)
+                if ($isLocal) { $path = $Run }
+                else { $path = New-TempFrom (Download-Bytes $Run) '.ps1' }
+                Write-Host "[*] Running .ps1 (disk)" -ForegroundColor Cyan
+                & $path @ScriptArgs
+            } else {
+                # run in memory (no temp file; no $PSScriptRoot)
+                if ($isLocal) { $text = Bytes-ToText ([System.IO.File]::ReadAllBytes($Run)) }
+                else { $text = Bytes-ToText (Download-Bytes $Run) }
+                Write-Host "[*] Running .ps1 (memory)" -ForegroundColor Cyan
+                & ([scriptblock]::Create($text)) @ScriptArgs
+            }
         }
         { $_ -in '.bat','.cmd' } {
-            # Batch scripts must run through cmd.exe from a real file on disk.
-            & cmd.exe /c $target @ScriptArgs
+            # batch always runs from a temp file, then is deleted
+            if ($isLocal) { $path = $Run }
+            else { $path = New-TempFrom (Download-Bytes $Run) $ext }
+            Write-Host "[*] Running $ext (disk)" -ForegroundColor Cyan
+            & cmd.exe /c $path @ScriptArgs
         }
         default {
-            Write-Host "[ERROR] Unsupported target type: $ext (only .ps1/.bat/.cmd/.exe/.msi)" -ForegroundColor Red
+            Write-Host "[ERROR] Unsupported target type: $ext (only .ps1/.bat/.cmd)" -ForegroundColor Red
         }
     }
 }
